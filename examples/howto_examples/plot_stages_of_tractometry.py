@@ -21,75 +21,27 @@ known as pillow).
 #
 
 
-import os
 import os.path as op
 import nibabel as nib
 import numpy as np
-import tempfile
+from math import radians
 
 from dipy.io.streamline import load_trk
 from dipy.tracking.streamline import (transform_streamlines,
-                                      set_number_of_points)
+                                      set_number_of_points,
+                                      values_from_volume)
 from dipy.core.gradients import gradient_table
 from dipy.align import resample
+from dipy.stats.analysis import afq_profile
 
 from fury import actor, window
-try:
-    from fury.actor import colormap_lookup_table
-except ImportError:
-    from fury.colormap import colormap_lookup_table
 from fury.colormap import create_colormap
 from matplotlib.cm import tab20
 
 import AFQ.data.fetch as afd
 from AFQ.viz.utils import gen_color_dict
+from AFQ._fixes import make_gif
 
-from PIL import Image
-
-##############################################################################
-# Define a function that makes videos
-# -----------------------------------
-# The PIL library has a function that can be used to create animated GIFs from
-# a series of images. We will use this function to create videos.
-#
-# .. note::
-#  This function is not part of the AFQ library, but is included here for
-#  convenience. It is not necessary to understand this function in order to
-#  understand the rest of the example. If you are interested in learning more
-#  about this function, you can read the PIL documentation. The function is
-#  based on the `PIL.Image.save <https://pillow.readthedocs.io/en/stable/reference/Image.html#PIL.Image.Image.save>`_
-#  function.
-
-
-def make_video(frames, out):
-    """
-    Make a video from a series of frames.
-
-    Parameters
-    ----------
-    frames : list of str
-        A list of file names of the frames to be included in the video.
-
-    out : str
-        The name of the output file. Format is determined by the file
-        extension.
-    """
-    video = []
-    for nn in frames:
-        frame = Image.open(nn)
-        video.append(frame)
-
-    # Save the frames as an animated GIF
-    video[0].save(
-        out,
-        save_all=True,
-        append_images=video[1:],
-        duration=300,
-        loop=1)
-
-
-tmp = tempfile.mkdtemp()
-n_frames = 72
 
 ###############################################################################
 # Get data from HBN POD2
@@ -108,7 +60,7 @@ study_path = afd.fetch_hbn_afq(["NDARAA948VFH"])[1]
 # Here, we will start by visualizing the diffusion data. We read in the
 # diffusion data, as well as the gradient table, using the `nibabel` library.
 # We then extract the b0, b1000, and b2000 volumes from the diffusion data.
-# We will use the `actor.slicer` function from `fury` to visualize these. This
+# We will use the `actor.data_slicer` function from `fury` to visualize these. This
 # function takes a 3D volume as input and returns a `slicer` actor, which can
 # then be added to a `window.Scene` object. We create a helper function that
 # will create a slicer actor for a given volume and a given slice along the x,
@@ -146,65 +98,41 @@ dmri_b2000 = dmri_data[..., 65]
 
 
 def slice_volume(data, x=None, y=None, z=None):
-    slicer_actors = []
-    slicer_actor_z = actor.slicer(data)
-    if z is not None:
-        slicer_actor_z.display_extent(
-            0, data.shape[0] - 1,
-            0, data.shape[1] - 1,
-            z, z)
-        slicer_actors.append(slicer_actor_z)
-    if y is not None:
-        slicer_actor_y = slicer_actor_z.copy()
-        slicer_actor_y.display_extent(
-            0, data.shape[0] - 1,
-            y, y,
-            0, data.shape[2] - 1)
-        slicer_actors.append(slicer_actor_y)
-    if x is not None:
-        slicer_actor_x = slicer_actor_z.copy()
-        slicer_actor_x.display_extent(
-            x, x,
-            0, data.shape[1] - 1,
-            0, data.shape[2] - 1)
-        slicer_actors.append(slicer_actor_x)
-
-    return slicer_actors
+    if x is None:
+        x = data.shape[0] // 2
+    if y is None:
+        y = data.shape[1] // 2
+    if z is None:
+        z = data.shape[2] // 2
+    slicer_actor = actor.data_slicer(
+        data,
+        initial_slices=(x, y, z))
+    return slicer_actor
 
 
-slicers_b0 = slice_volume(
+slicer_b0 = slice_volume(
     dmri_b0,
-    x=dmri_b0.shape[0] // 2,
-    y=dmri_b0.shape[1] // 2,
     z=dmri_b0.shape[-1] // 3)
-slicers_b1000 = slice_volume(
+slicer_b1000 = slice_volume(
     dmri_b1000,
-    x=dmri_b0.shape[0] // 2,
-    y=dmri_b0.shape[1] // 2,
-    z=dmri_b0.shape[-1] // 3)
-slicers_b2000 = slice_volume(
+    z=dmri_b1000.shape[-1] // 3)
+slicer_b2000 = slice_volume(
     dmri_b2000,
-    x=dmri_b0.shape[0] // 2,
-    y=dmri_b0.shape[1] // 2,
-    z=dmri_b0.shape[-1] // 3)
+    z=dmri_b2000.shape[-1] // 3)
 
-for bval, slicers in zip([0, 1000, 2000],
-                         [slicers_b0, slicers_b1000, slicers_b2000]):
+for bval, slicer in zip([0, 1000, 2000],
+                         [slicer_b0, slicer_b1000, slicer_b2000]):
     scene = window.Scene()
-    for slicer in slicers:
-        scene.add(slicer)
-    scene.set_camera(position=(721.34, 393.48, 97.03),
-                     focal_point=(96.00, 114.00, 96.00),
-                     view_up=(-0.01, 0.02, 1.00))
+    scene.add(slicer)
+    scene.background = (1, 1, 1)
 
-    scene.background((1, 1, 1))
-    window.record(scene, out_path=f'{tmp}/b{bval}',
-                  size=(2400, 2400),
-                  n_frames=n_frames, path_numbering=True)
-
-    make_video(
-        [f'{tmp}/b{bval}{ii:06d}.png' for ii in range(n_frames)],
-        f'b{bval}.gif')
+    show_m = window.ShowManager(
+        scene=scene, window_type="offscreen",
+        size=(2400, 2400)
+    )
+    window.update_camera(show_m.screens[0].camera, None, slicer)
+    show_m.screens[0].controller.rotate((0, radians(-90)), None)
+    make_gif(show_m, f'b{bval}.gif')
 
 #############################################################################
 # Visualizing whole-brain tractography
@@ -253,32 +181,27 @@ whole_brain_t1w = transform_streamlines(
 #
 
 
-def lines_as_tubes(sl, line_width, **kwargs):
-    line_actor = actor.line(sl, **kwargs)
-    line_actor.GetProperty().SetRenderLinesAsTubes(1)
-    line_actor.GetProperty().SetLineWidth(line_width)
-    return line_actor
 
+whole_brain_actor = actor.streamlines(whole_brain_t1w, thickness=2)
+slicer = slice_volume(t1w, y=t1w.shape[1] // 2 - 5, z=t1w.shape[-1] // 3)
 
-whole_brain_actor = lines_as_tubes(whole_brain_t1w, 2)
-slicers = slice_volume(t1w, y=t1w.shape[1] // 2 - 5, z=t1w.shape[-1] // 3)
+def rotate_to_anterior(show_m):
+    window.update_camera(show_m.screens[0].camera, None, slicer)
+    show_m.screens[0].controller.rotate((0, radians(-90)), None)
+
 
 scene = window.Scene()
 
 scene.add(whole_brain_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
-scene.set_camera(position=(721.34, 393.48, 97.03),
-                 focal_point=(96.00, 114.00, 96.00),
-                 view_up=(-0.01, 0.02, 1.00))
-
-scene.background((1, 1, 1))
-window.record(scene, out_path=f'{tmp}/whole_brain', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
-
-make_video([f"{tmp}/whole_brain{ii:06d}.png" for ii in range(n_frames)],
-           "whole_brain.gif")
+scene.background = (1, 1, 1)
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "whole_brain.gif")
 
 #############################################################################
 # Whole brain with waypoints
@@ -292,13 +215,12 @@ make_video([f"{tmp}/whole_brain{ii:06d}.png" for ii in range(n_frames)],
 # https://docs.dipy.org/1.11.0/examples_built/registration/syn_registration_3d.html
 
 scene.clear()
-whole_brain_actor = lines_as_tubes(whole_brain_t1w, 2)
+whole_brain_actor = actor.streamlines(whole_brain_t1w, thickness=2)
 
 scene.add(whole_brain_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
-scene.background((1, 1, 1))
+scene.background = (1, 1, 1)
 
 waypoint1 = nib.load(
     op.join(
@@ -328,31 +250,24 @@ waypoint2_actor = actor.contour_from_roi(waypoint2_data,
 scene.add(waypoint1_actor)
 scene.add(waypoint2_actor)
 
-window.record(scene, out_path=f'{tmp}/whole_brain_with_waypoints', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
-
-make_video([f"{tmp}/whole_brain_with_waypoints{ii:06d}.png" for ii in range(n_frames)],
-           "whole_brain_with_waypoints.gif")
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "whole_brain_with_waypoints.gif")
 
 bundle_path = op.join(afq_path,
                       'bundles')
 
-#############################################################################
-# Visualize the arcuate bundle
-# ----------------------------
-# Now visualize only the arcuate bundle that is selected with these waypoints.
-#
-
-fa_img = nib.load(op.join(afq_path,
-                          'sub-NDARAA948VFH_ses-HBNsiteRU_acq-64dir_space-T1w_desc-preproc_dwi_model-DKI_FA.nii.gz'))
-fa = fa_img.get_fdata()
-sft_arc = load_trk(op.join(bundle_path,
-                           'sub-NDARAA948VFH_ses-HBNsiteRU_acq-64dir_space-T1w_desc-preproc_dwi_space-RASMM_model-CSD_desc-prob-afq-ARC_L_tractography.trk'), fa_img)
-
-sft_arc.to_rasmm()
-arc_t1w = transform_streamlines(sft_arc.streamlines,
-                                np.linalg.inv(t1w_img.affine))
-
+############################################
+# Define the bundles
+# The bundles are defined by the waypoints that we just visualized. Here
+# we organize some names of bundles we want to visualize.
+# In current pyAFQ, only the formal names are used. But for this example,
+# we will use derivatives from previous versions of pyAFQ, where names
+# were abbreviated. We have standardized colors for each bundle,
+# provided by `gen_color_dict`, which we will use for visualization.
 
 bundles = [
     "ARC_R",
@@ -375,22 +290,66 @@ bundles = [
     "ARC_L",
 ]
 
-color_dict = gen_color_dict(bundles)
+formal_bundles = [
+    "Right Arcuate",
+    "Right Anterior Thalamic",
+    "Right Corticospinal",
+    "Right Inferior Fronto-Occipital",
+    "Right Inferior Longitudinal",
+    "Right Superior Longitudinal",
+    "Right Uncinate",
+    "Right Cingulum Cingulate",
+    "Callosum Orbital",
+    "Callosum Anterior Frontal",
+    "Callosum Superior Frontal",
+    "Callosum Motor",
+    "Callosum Superior Parietal",
+    "Callosum Posterior Parietal",
+    "Callosum Temporal",
+    "Callosum Occipital",
+    "Left Cingulum Cingulate",
+    "Left Uncinate",
+    "Left Superior Longitudinal",
+    "Left Inferior Longitudinal",
+    "Left Inferior Fronto-Occipital",
+    "Left Corticospinal",
+    "Left Anterior Thalamic",
+    "Left Arcuate",
+]
 
-arc_actor = lines_as_tubes(arc_t1w, 8, colors=color_dict['ARC_L'])
+color_dict = gen_color_dict(formal_bundles)
+
+#############################################################################
+# Visualize the arcuate bundle
+# ----------------------------
+# Now visualize only the arcuate bundle that is selected with these waypoints.
+#
+
+fa_img = nib.load(op.join(afq_path,
+                          'sub-NDARAA948VFH_ses-HBNsiteRU_acq-64dir_space-T1w_desc-preproc_dwi_model-DKI_FA.nii.gz'))
+fa = fa_img.get_fdata()
+sft_arc = load_trk(op.join(bundle_path,
+                           'sub-NDARAA948VFH_ses-HBNsiteRU_acq-64dir_space-T1w_desc-preproc_dwi_space-RASMM_model-CSD_desc-prob-afq-ARC_L_tractography.trk'), fa_img)
+
+sft_arc.to_rasmm()
+arc_t1w = transform_streamlines(sft_arc.streamlines,
+                                np.linalg.inv(t1w_img.affine))
+
+arc_actor = actor.streamlines(arc_t1w, thickness=8, colors=color_dict['Left Arcuate'])
 scene.clear()
 
 scene.add(arc_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
 scene.add(waypoint1_actor)
 scene.add(waypoint2_actor)
 
-window.record(scene, out_path=f'{tmp}/arc1', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
-
-make_video([f"{tmp}/arc1{ii:06d}.png" for ii in range(n_frames)], "arc1.gif")
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "arc1.gif")
 
 #############################################################################
 # Clean bundle
@@ -401,13 +360,14 @@ make_video([f"{tmp}/arc1{ii:06d}.png" for ii in range(n_frames)], "arc1.gif")
 scene.clear()
 
 scene.add(arc_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
-window.record(scene, out_path=f'{tmp}/arc2', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
-
-make_video([f"{tmp}/arc2{ii:06d}.png" for ii in range(n_frames)], "arc2.gif")
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "arc2.gif")
 
 clean_bundles_path = op.join(afq_path,
                              'clean_bundles')
@@ -419,18 +379,18 @@ sft_arc.to_rasmm()
 arc_t1w = transform_streamlines(sft_arc.streamlines,
                                 np.linalg.inv(t1w_img.affine))
 
-
-arc_actor = lines_as_tubes(arc_t1w, 8, colors=tab20.colors[18])
+arc_actor = actor.streamlines(arc_t1w, thickness=8, colors=tab20.colors[18])
 scene.clear()
 
 scene.add(arc_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
-window.record(scene, out_path=f'{tmp}/arc3', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
-
-make_video([f"{tmp}/arc3{ii:06d}.png" for ii in range(n_frames)], "arc3.gif")
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "arc3.gif")
 
 #############################################################################
 # Show the values of tissue properties along the bundle
@@ -443,24 +403,25 @@ make_video([f"{tmp}/arc3{ii:06d}.png" for ii in range(n_frames)], "arc3.gif")
 # There is a DIPY example with more details here:
 # https://docs.dipy.org/1.11.0/examples_built/streamline_analysis/afq_tract_profiles.html
 
-lut_args = dict(scale_range=(0, 1),
-                hue_range=(1, 0),
-                saturation_range=(0, 1),
-                value_range=(0, 1))
-
-arc_actor = lines_as_tubes(arc_t1w, 8,
-                           colors=resample(fa_img, t1w_img).get_fdata(),
-                           lookup_colormap=colormap_lookup_table(**lut_args))
 scene.clear()
 
-scene.add(arc_actor)
-for slicer in slicers:
-    scene.add(slicer)
+fa_in_t1 = resample(fa_img, t1w_img).get_fdata()
+fa_profiles = values_from_volume(fa_in_t1, arc_t1w, np.eye(4))
+for ii in range(len(arc_t1w)):
+    colors = create_colormap(np.asarray(fa_profiles[ii]), name="blues", auto=False)
+    arc_actor = actor.streamlines(
+        arc_t1w[ii], thickness=8,
+        colors=colors)
+    scene.add(arc_actor)
 
-window.record(scene, out_path=f'{tmp}/arc4', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
+scene.add(slicer)
 
-make_video([f"{tmp}/arc4{ii:06d}.png" for ii in range(n_frames)], "arc4.gif")
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "arc4.gif")
 
 #############################################################################
 # Core of the bundle and tract profile
@@ -471,32 +432,33 @@ make_video([f"{tmp}/arc4{ii:06d}.png" for ii in range(n_frames)], "arc4.gif")
 
 core_arc = np.median(np.asarray(set_number_of_points(arc_t1w, 20)), axis=0)
 
-from dipy.stats.analysis import afq_profile
 sft_arc.to_vox()
 arc_profile = afq_profile(fa, sft_arc.streamlines, affine=np.eye(4),
                           n_points=20)
 
-core_arc_actor = lines_as_tubes(
+core_arc_actor = actor.streamlines(
     [core_arc],
-    40,
-    colors=create_colormap(arc_profile, 'viridis')
+    thickness=40,
+    colors=create_colormap(arc_profile, name='viridis')
 )
 
-arc_actor = lines_as_tubes(arc_t1w, 1,
-                           colors=resample(fa_img, t1w_img).get_fdata(),
-                           lookup_colormap=colormap_lookup_table(**lut_args))
+arc_actor = actor.streamlines(
+    arc_t1w,
+    thickness=1,
+    opacity=0.2)  # better to visualize the core
 
 scene.clear()
 
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 scene.add(arc_actor)
 scene.add(core_arc_actor)
 
-window.record(scene, out_path=f'{tmp}/arc5', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
-
-make_video([f"{tmp}/arc5{ii:06d}.png" for ii in range(n_frames)], "arc5.gif")
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "arc5.gif")
 
 #############################################################################
 # Core of all bundles and their tract profiles
@@ -504,11 +466,9 @@ make_video([f"{tmp}/arc5{ii:06d}.png" for ii in range(n_frames)], "arc5.gif")
 # Same as before, but for all bundles.
 
 scene.clear()
+scene.add(slicer)
 
-for slicer in slicers:
-    scene.add(slicer)
-
-for bundle in bundles:
+for ii, bundle in enumerate(bundles):
     sft = load_trk(op.join(clean_bundles_path,
                            f'sub-NDARAA948VFH_ses-HBNsiteRU_acq-64dir_space-T1w_desc-preproc_dwi_space-RASMM_model-CSD_desc-prob-afq-{bundle}_tractography.trk'), fa_img)
 
@@ -516,21 +476,23 @@ for bundle in bundles:
     bundle_t1w = transform_streamlines(sft.streamlines,
                                        np.linalg.inv(t1w_img.affine))
 
-    bundle_actor = lines_as_tubes(bundle_t1w, 8, colors=color_dict[bundle])
+    bundle_actor = actor.streamlines(
+        bundle_t1w,
+        thickness=8,
+        colors=color_dict[formal_bundles[ii]]
+    )
     scene.add(bundle_actor)
 
-window.record(scene, out_path=f'{tmp}/all_bundles', size=(2400, 2400),
-              n_frames=n_frames, path_numbering=True)
-
-make_video(
-    [f"{tmp}/all_bundles{ii:06d}.png" for ii in range(n_frames)],
-    "all_bundles.gif")
-
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "all_bundles.gif")
 
 scene.clear()
 
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
 tract_profiles = []
 for bundle in bundles:
@@ -547,22 +509,21 @@ for bundle in bundles:
         afq_profile(fa, sft.streamlines, affine=np.eye(4),
                     n_points=20))
 
-    core_actor = lines_as_tubes(
+    core_actor = actor.streamlines(
         [core_bundle],
-        40,
-        colors=create_colormap(tract_profiles[-1], 'viridis')
+        thickness=40,
+        colors=create_colormap(tract_profiles[-1], name='viridis')
     )
 
     scene.add(core_actor)
 
-window.record(scene,
-              out_path=f'{tmp}/all_tract_profiles',
-              size=(2400, 2400),
-              n_frames=n_frames,
-              path_numbering=True)
+show_m = window.ShowManager(
+    scene=scene, window_type="offscreen",
+    size=(2400, 2400)
+)
+rotate_to_anterior(show_m)
+make_gif(show_m, "all_tract_profiles.gif")
 
-make_video([f"{tmp}/all_tract_profiles{ii:06d}.png" for ii in range(n_frames)],
-           "all_tract_profiles.gif")
 
 #############################################################################
 # Tract profiles as a table
@@ -578,7 +539,7 @@ fig, ax = plt.subplots()
 for ii, bundle in enumerate(bundles):
     ax.plot(np.arange(ii * 20, (ii + 1) * 20),
             tract_profiles[ii],
-            color=color_dict[bundle],
+            color=color_dict[formal_bundles[ii]],
             linewidth=3)
 ax.set_xticks(np.arange(0, 20 * len(bundles), 20))
 ax.set_xticklabels(bundles, rotation=45, ha='right')
