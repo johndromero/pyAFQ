@@ -913,7 +913,7 @@ class GroupAFQ(object):
 
                 pio.kaleido.scope._shutdown_kaleido()
             else:
-                from dipy.viz import window
+                from fury import window
 
                 direc = np.fromiter(eye.values(), dtype=int)
                 data_shape = np.asarray(nib.load(b0).get_fdata().shape)

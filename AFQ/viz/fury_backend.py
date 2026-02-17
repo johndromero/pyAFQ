@@ -9,7 +9,7 @@ import AFQ.viz.utils as vut
 
 try:
     import IPython.display as display
-    from dipy.viz import actor, ui, window
+    from fury import actor, ui, window
     from fury.colormap import line_colors
 except (ImportError, ModuleNotFoundError) as e:
     raise ImportError(vut.viz_import_msg_error("fury")) from e
