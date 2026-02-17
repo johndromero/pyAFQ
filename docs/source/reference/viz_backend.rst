@@ -42,4 +42,7 @@ Below is an example dockerfile that can be used to build that base image::
               libgl1 \
               libglx-mesa0 \
               libegl1 \
-              libgl1-mesa-dri
+              libgl1-mesa-dri \
+              libvulkan1 \
+              mesa-vulkan-drivers \
+              vulkan-tools
