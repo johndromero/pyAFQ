@@ -34,7 +34,10 @@ from dipy.core.gradients import gradient_table
 from dipy.align import resample
 
 from fury import actor, window
-from fury.actor import colormap_lookup_table
+try:
+    from fury.actor import colormap_lookup_table
+except ImportError:
+    from fury.colormap import colormap_lookup_table
 from fury.colormap import create_colormap
 from matplotlib.cm import tab20
 
