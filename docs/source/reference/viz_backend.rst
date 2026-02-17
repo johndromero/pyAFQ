@@ -38,4 +38,8 @@ Below is an example dockerfile that can be used to build that base image::
    FROM python:3.13
    # Install libgl
    RUN apt-get update
-   RUN apt-get install -y libegl1-mesa libgl1-mesa-dri
+   RUN apt-get install -y \
+              libgl1 \
+              libglx-mesa0 \
+              libegl1 \
+              libgl1-mesa-dri
