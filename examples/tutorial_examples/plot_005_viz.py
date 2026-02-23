@@ -21,6 +21,7 @@ import os
 import os.path as op
 import nibabel as nib
 import numpy as np
+from math import radians
 
 from dipy.io.streamline import load_trk
 from dipy.tracking.streamline import transform_streamlines
@@ -102,24 +103,6 @@ cst_t1w = transform_streamlines(sft_cst.streamlines,
 
 
 #############################################################################
-#
-# .. note::
-#   A virtual frame buffer is needed if you are running this example on
-#   a machine that is not connected to a display ("headless"). If this is
-#   the case, you can either set an environment variable called `XVFB` to `1`
-#   or you can deindent the following code (and comment out the `if` statement)
-#   to initialize the virtual frame buffer.
-
-if os.environ.get("XVFB", False):
-    print("Initializing XVFB")
-    import xvfbwrapper
-    from xvfbwrapper import Xvfb
-
-    vdisplay = Xvfb()
-    vdisplay.start()
-
-
-#############################################################################
 # Visualizing bundles with principal direction coloring
 # -----------------------------------------------------
 # The first visualization we will create will have the streamlines colored
@@ -138,63 +121,28 @@ if os.environ.get("XVFB", False):
 # to `actor.line`, but for now we use the default setting, which colors each
 # streamline based on the RAS orientation, and we set the line width to 8.
 
-def lines_as_tubes(sl, line_width, **kwargs):
-    line_actor = actor.line(sl, **kwargs)
-    line_actor.GetProperty().SetRenderLinesAsTubes(1)
-    line_actor.GetProperty().SetLineWidth(line_width)
-    return line_actor
 
-
-arc_actor = lines_as_tubes(arc_t1w, 8)
-cst_actor = lines_as_tubes(cst_t1w, 8)
+arc_actor = actor.streamlines(arc_t1w, thickness=8)
+cst_actor = actor.streamlines(cst_t1w, thickness=8)
 
 
 #############################################################################
 # Slicer actors
 # -------------
 # The anatomical image is rendered using `slicer` actors. These are actors that
-# visualize one slice of a three dimensional volume. Again, we create a helper
-# function that will slice a volume along the x, y, and z dimensions. This
-# function returns a list of the slicers we want to include in our
-# visualization. This can be one, two, or three slicers, depending on how many
-# of {x,y,z} are set. If you are curious to understand what is going on in this
-# function, take a look at the documentation for the
-# :met:`actor.slicer.display_extent` method (hint: for every dimension you
-# select on, you want the full extent of the image on the two *other* two
-# dimensions). We call the function on the T1-weighted data, selecting the # x
-# slice that is half-way through the x dimension of the image (`shape[0]`) and
-# the z slice that is a third of a way through that x dimension of the image
-# (`shape[-1]`).
+# visualize one slice of a three dimensional volume. We call the function on the
+# T1-weighted data, selecting the x slice that is half-way through the x
+# dimension of the image (`shape[0]`) and the z slice that is a third of a
+# way through that x dimension of the image (`shape[-1]`).
+# We set the visibility of the y slice to `False`
 
-
-def slice_volume(data, x=None, y=None, z=None):
-    slicer_actors = []
-    slicer_actor_z = actor.slicer(data)
-    if z is not None:
-        slicer_actor_z.display_extent(
-            0, data.shape[0] - 1,
-            0, data.shape[1] - 1,
-            z, z)
-        slicer_actors.append(slicer_actor_z)
-    if y is not None:
-        slicer_actor_y = slicer_actor_z.copy()
-        slicer_actor_y.display_extent(
-            0, data.shape[0] - 1,
-            y, y,
-            0, data.shape[2] - 1)
-        slicer_actors.append(slicer_actor_y)
-    if x is not None:
-        slicer_actor_x = slicer_actor_z.copy()
-        slicer_actor_x.display_extent(
-            x, x,
-            0, data.shape[1] - 1,
-            0, data.shape[2] - 1)
-        slicer_actors.append(slicer_actor_x)
-
-    return slicer_actors
-
-
-slicers = slice_volume(t1w, x=t1w.shape[0] // 2, z=t1w.shape[-1] // 3)
+slicer = actor.data_slicer(t1w,
+                           visibility=(
+                               True, False, True),
+                           initial_slices=(
+                               t1w.shape[0] // 2,
+                               t1w.shape[1] // 2,
+                               t1w.shape[-1] // 3))
 
 #############################################################################
 # Making a `scene`
@@ -207,15 +155,14 @@ scene = window.Scene()
 
 scene.add(arc_actor)
 scene.add(cst_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
 #############################################################################
 # Showing the visualization
 # -------------------------
 # If you are working in an interactive session, you can call::
 #
-#     window.show(scene, size=(1200, 1200), reset_camera=False)
+#     window.show(scene, size=(1200, 1200))
 #
 # to see what the visualization looks like. This would pop up a window that will
 # show you the visualization as it is now. You can interact with this
@@ -223,25 +170,7 @@ for slicer in slicers:
 # mouse+shift to pan and rotate it in plane, respectively. Use the scroll up and
 # scroll down in your mouse to zoom in and out. Once you have found a view of
 # the data that you like, you can close the window (as long as its open, it is
-# blocking execution of any further commands in the Python interpreter!) and
-# then you can query your scene for the "camera settings" by calling::
-#
-#     scene.camera_info()
-#
-# This will print out to the screen something like this::
-#
-#     # Active Camera
-#        Position (238.04, 174.48, 143.04)
-#        Focal Point (96.32, 110.34, 84.48)
-#        View Up (-0.33, -0.12, 0.94)
-#
-# We can use the information we have gleaned to set the camera on subsequent
-# visualization that use this scene object.
-
-
-scene.set_camera(position=(238.04, 174.48, 143.04),
-                 focal_point=(96.32, 110.34, 84.48),
-                 view_up=(-0.33, -0.12, 0.94))
+# blocking execution of any further commands in the Python interpreter!)
 
 #############################################################################
 # Record the visualization
@@ -253,10 +182,20 @@ scene.set_camera(position=(238.04, 174.48, 143.04),
 
 out_folder = op.join(afd.afq_home, "VizExample")
 os.makedirs(out_folder, exist_ok=True)
-window.record(
-    scene=scene,
-    out_path=op.join(out_folder, 'arc_cst1.png'),
-    size=(2400, 2400))
+
+def save_png(scene, name):
+    """Helper function to PNGs in this example."""
+    show_m = window.ShowManager(
+        scene=scene, window_type="offscreen",
+        size=(2400, 2400)
+    )
+    window.update_camera(show_m.screens[0].camera, None, scene)
+    show_m.screens[0].controller.rotate((0, radians(-90)), None)
+    show_m.render()
+    show_m.window.draw()
+    show_m.snapshot(op.join(out_folder, name))
+
+save_png(scene, 'arc_cst1.png')
 
 
 ############################################################################
@@ -277,21 +216,16 @@ from matplotlib.cm import tab20
 color_arc = tab20.colors[18]
 color_cst = tab20.colors[2]
 
-arc_actor = lines_as_tubes(arc_t1w, 8, colors=color_arc)
-cst_actor = lines_as_tubes(cst_t1w, 8, colors=color_cst)
+arc_actor = actor.streamlines(arc_t1w, thickness=8, colors=color_arc)
+cst_actor = actor.streamlines(cst_t1w, thickness=8, colors=color_cst)
 
 scene.clear()
 
 scene.add(arc_actor)
 scene.add(cst_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
-window.record(
-    scene=scene,
-    out_path=op.join(out_folder, 'arc_cst2.png'),
-    size=(2400, 2400))
-
+save_png(scene, 'arc_cst2.png')
 
 #############################################################################
 # Adding core bundles with tract profiles
@@ -333,35 +267,30 @@ sft_cst.to_vox()
 arc_profile = afq_profile(fa, sft_arc.streamlines, affine=np.eye(4))
 cst_profile = afq_profile(fa, sft_cst.streamlines, affine=np.eye(4))
 
-core_arc_actor = lines_as_tubes(
+core_arc_actor = actor.streamlines(
     [core_arc],
-    40,
+    thickness=40,
     colors=create_colormap(arc_profile, name='viridis')
 )
 
-core_cst_actor = lines_as_tubes(
+core_cst_actor = actor.streamlines(
     [core_cst],
-    40,
+    thickness=40,
     colors=create_colormap(cst_profile, name='viridis')
 )
 
 scene.clear()
 
-arc_actor = lines_as_tubes(arc_t1w, 8, colors=color_arc, opacity=0.1)
-cst_actor = lines_as_tubes(cst_t1w, 8, colors=color_cst, opacity=0.1)
+arc_actor = actor.streamlines(arc_t1w, thickness=8, colors=color_arc, opacity=0.1)
+cst_actor = actor.streamlines(cst_t1w, thickness=8, colors=color_cst, opacity=0.1)
 
 scene.add(arc_actor)
 scene.add(cst_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 scene.add(core_arc_actor)
 scene.add(core_cst_actor)
 
-window.record(
-    scene=scene,
-    out_path=op.join(out_folder, 'arc_cst3.png'),
-    size=(2400, 2400))
-
+save_png(scene, 'arc_cst3.png')
 
 #############################################################################
 # Adding ROIs
@@ -376,7 +305,7 @@ window.record(
 # interpolation from the low resolution of the diffusion into the high
 # resolution of the T1-weighted. We will include in the volume rendering any
 # values larger than 0. The main change from the previous visualizations is the
-# adition of a `contour_from_roi` actor for each of the ROIs. We select another
+# addition of a `contour_from_roi` actor for each of the ROIs. We select another
 # color from the Tableau 20 palette to represent this, and use an opacity of
 # 0.5.
 #
@@ -406,13 +335,12 @@ waypoint2_data = waypoint2_xform.get_fdata() > 0
 
 scene.clear()
 
-arc_actor = lines_as_tubes(arc_t1w, 8, colors=color_arc)
-cst_actor = lines_as_tubes(cst_t1w, 8, colors=color_cst)
+arc_actor = actor.streamlines(arc_t1w, thickness=8, colors=color_arc)
+cst_actor = actor.streamlines(cst_t1w, thickness=8, colors=color_cst)
 
 scene.add(arc_actor)
 scene.add(cst_actor)
-for slicer in slicers:
-    scene.add(slicer)
+scene.add(slicer)
 
 surface_color = tab20.colors[0]
 
@@ -428,11 +356,7 @@ waypoint2_actor = actor.contour_from_roi(waypoint2_data,
 scene.add(waypoint1_actor)
 scene.add(waypoint2_actor)
 
-
-window.record(
-    scene=scene,
-    out_path=op.join(out_folder, 'arc_cst4.png'),
-    size=(2400, 2400))
+save_png(scene, 'arc_cst4.png')
 
 #############################################################################
 # Visualizing tracts and tract profiles with a "glass brain"
@@ -471,14 +395,11 @@ for sl in arc_t1w:
                                     np.linspace(0, 1, len(arc_profile)),
                                     arc_profile)
     colors = create_colormap(interpolated_values, name='Spectral')
-    line_actor = lines_as_tubes([sl], 8, colors=colors)
+    line_actor = actor.streamlines([sl], thickness=8, colors=colors)
     scene.add(line_actor)
 
-scene.background((1, 1, 1))
-window.record(
-    scene=scene,
-    out_path=op.join(out_folder, 'arc_cst5.png'),
-    size=(2400, 2400))
+scene.background = (1, 1, 1)
+save_png(scene, 'arc_cst5.png')
 
 #############################################################################
 # Making a Figure out of many fury panels
@@ -495,15 +416,6 @@ pf.add_img(op.join(out_folder, 'arc_cst2.png'), 1, 0)
 pf.add_img(op.join(out_folder, 'arc_cst3.png'), 0, 1)
 pf.add_img(op.join(out_folder, 'arc_cst5.png'), 1, 1)
 pf.format_and_save_figure(f"arc_cst_fig.png")
-
-#############################################################################
-#
-# .. note::
-#   If a virtual buffer was started before, it's a good idea to stop it.
-
-if os.environ.get("XVFB", False):
-    print("Stopping XVFB")
-    vdisplay.stop()
 
 #############################################################################
 # References

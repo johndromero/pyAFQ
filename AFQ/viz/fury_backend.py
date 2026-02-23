@@ -1,15 +1,14 @@
 import logging
-import os.path as op
-import tempfile
+from math import radians
 
 import numpy as np
 from dipy.tracking.streamline import set_number_of_points
 
 import AFQ.viz.utils as vut
+from AFQ._fixes import make_gif
 
 try:
-    import IPython.display as display
-    from dipy.viz import actor, ui, window
+    from fury import actor, window
     from fury.colormap import line_colors
 except (ImportError, ModuleNotFoundError) as e:
     raise ImportError(vut.viz_import_msg_error("fury")) from e
@@ -23,14 +22,19 @@ def _inline_interact(scene, inline, interact):
     """
     if interact:
         viz_logger.info("Showing interactive scene...")
-        window.show(scene)
+        show_m = window.ShowManager(
+            scene=scene, size=(1200, 1200), window_type="default"
+        )
+        show_m.start()
 
     if inline:
         viz_logger.info("Showing inline scene...")
-        tdir = tempfile.gettempdir()
-        fname = op.join(tdir, "fig.png")
-        window.snapshot(scene, fname=fname, size=(1200, 1200))
-        display.display_png(display.Image(fname))
+        show_m = window.ShowManager(
+            scene=scene,
+            size=(1200, 1200),
+            window_type="jupyter",
+        )
+        show_m.start()
 
     return scene
 
@@ -112,7 +116,7 @@ def visualize_bundles(
     if figure is None:
         figure = window.Scene()
 
-    figure.SetBackground(background[0], background[1], background[2])
+    figure.background = (background[0], background[1], background[2])
 
     for sls, color, name, dimensions in vut.tract_generator(
         seg_sft, bundle, colors, n_points, img
@@ -129,76 +133,63 @@ def visualize_bundles(
                 sl[:, 2] = dimensions[2] - sl[:, 2]
 
         if color_by_direction:
-            sl_actor = actor.line(sls, opacity=opacity)
+            sl_actor = actor.streamlines(sls, opacity=opacity, thickness=line_width)
         else:
-            sl_actor = actor.line(sls, color, opacity=opacity)
+            sl_actor = actor.streamlines(
+                sls, colors=color, opacity=opacity, thickness=line_width
+            )
         figure.add(sl_actor)
-        sl_actor.GetProperty().SetRenderLinesAsTubes(1)
-        sl_actor.GetProperty().SetLineWidth(line_width)
 
     return _inline_interact(figure, inline, interact)
 
 
-def scene_rotate_forward(scene):
-    scene.elevation(90)
-    scene.set_camera(view_up=(0.0, 0.0, 1.0))
-    scene.reset_camera()
-    return scene
+def scene_rotate_forward(show_m, scene):
+    window.update_camera(show_m.screens[0].camera, None, scene)
+    show_m.screens[0].controller.rotate((0, radians(-90)), None)
+    show_m.render()
+    show_m.window.draw()
 
 
 def create_gif(
     figure,
     file_name,
-    n_frames=60,
-    zoom=1,
-    z_offset=0.5,
+    n_frames=36,
+    az_ang=-10,
     size=(600, 600),
-    rotate_forward=True,
 ):
     """
     Convert a Fury Scene object into a gif
 
+    Make a video from a Fury Show Manager.
+
     Parameters
     ----------
-    figure: Fury Scene object
-        Scene to be converted to a gif
+    figure : Fury Scene object
+        The Fury Scene object to render.
 
-    file_name: str
-        File to save gif to.
+    file_name : str
+        The name of the output file.
 
-    n_frames: int, optional
-        Number of frames in gif.
-        Will be evenly distributed throughout the rotation.
-        Default: 60
+    n_frames : int
+        The number of frames to render.
+        Default: 36
 
-    zoom: int, optional
-        How much to magnify the figure in the fig.
-        Default: 1
+    az_ang : float
+        The angle to rotate the camera around the
+        z-axis for each frame, in degrees.
+        Default: -10
 
-    size: tuple, optional
-        Size of the gif.
+    size : tuple
+        The size of the output gif, in pixels.
         Default: (600, 600)
-
-    rotate_forward: bool, optional
-        Whether to rotate the figure forward before converting to a gif.
-        Generally necessary for fury scenes.
-        Default: True
     """
-    if rotate_forward:
-        figure = scene_rotate_forward(figure)
-
-    tdir = tempfile.gettempdir()
-    window.record(
-        figure,
-        az_ang=360.0 / n_frames,
-        n_frames=n_frames,
-        path_numbering=True,
-        out_path=tdir + "/tgif",
-        magnification=zoom,
+    show_m = window.ShowManager(
+        scene=figure,
+        window_type="offscreen",
         size=size,
     )
-
-    vut.gif_from_pngs(tdir, file_name, n_frames, png_fname="tgif", add_zeros=True)
+    scene_rotate_forward(show_m, figure)
+    make_gif(show_m, file_name, n_frames=n_frames, az_ang=az_ang)
 
 
 def visualize_roi(
@@ -338,133 +329,14 @@ def visualize_volume(
         figure = window.Scene()
 
     shape = volume.shape
-    image_actor_z = actor.slicer(volume)
-    slicer_opacity = opacity
-    image_actor_z.opacity(slicer_opacity)
-
-    image_actor_x = image_actor_z.copy()
     if x is None:
-        x = int(np.round(shape[0] / 2))
-    image_actor_x.display_extent(x, x, 0, shape[1] - 1, 0, shape[2] - 1)
-
-    image_actor_y = image_actor_z.copy()
-
+        x = shape[0] // 2
     if y is None:
-        y = int(np.round(shape[1] / 2))
-    image_actor_y.display_extent(0, shape[0] - 1, y, y, 0, shape[2] - 1)
-
-    figure.add(image_actor_z)
-    figure.add(image_actor_x)
-    figure.add(image_actor_y)
-
-    show_m = window.ShowManager(figure, size=(1200, 900))
-    show_m.initialize()
-
-    if interact:
-        line_slider_z = ui.LineSlider2D(
-            min_value=0,
-            max_value=shape[2] - 1,
-            initial_value=shape[2] / 2,
-            text_template="{value:.0f}",
-            length=140,
-        )
-
-        line_slider_x = ui.LineSlider2D(
-            min_value=0,
-            max_value=shape[0] - 1,
-            initial_value=shape[0] / 2,
-            text_template="{value:.0f}",
-            length=140,
-        )
-
-        line_slider_y = ui.LineSlider2D(
-            min_value=0,
-            max_value=shape[1] - 1,
-            initial_value=shape[1] / 2,
-            text_template="{value:.0f}",
-            length=140,
-        )
-
-        opacity_slider = ui.LineSlider2D(
-            min_value=0.0, max_value=1.0, initial_value=slicer_opacity, length=140
-        )
-
-        def change_slice_z(slider):
-            z = int(np.round(slider.value))
-            image_actor_z.display_extent(0, shape[0] - 1, 0, shape[1] - 1, z, z)
-
-        def change_slice_x(slider):
-            x = int(np.round(slider.value))
-            image_actor_x.display_extent(x, x, 0, shape[1] - 1, 0, shape[2] - 1)
-
-        def change_slice_y(slider):
-            y = int(np.round(slider.value))
-            image_actor_y.display_extent(0, shape[0] - 1, y, y, 0, shape[2] - 1)
-
-        def change_opacity(slider):
-            slicer_opacity = slider.value
-            image_actor_z.opacity(slicer_opacity)
-            image_actor_x.opacity(slicer_opacity)
-            image_actor_y.opacity(slicer_opacity)
-
-        line_slider_z.on_change = change_slice_z
-        line_slider_x.on_change = change_slice_x
-        line_slider_y.on_change = change_slice_y
-        opacity_slider.on_change = change_opacity
-
-        def build_label(text):
-            label = ui.TextBlock2D()
-            label.message = text
-            label.font_size = 18
-            label.font_family = "Arial"
-            label.justification = "left"
-            label.bold = False
-            label.italic = False
-            label.shadow = False
-            label.background = (0, 0, 0)
-            label.color = (1, 1, 1)
-
-            return label
-
-        line_slider_label_z = build_label(text="Z Slice")
-        line_slider_label_x = build_label(text="X Slice")
-        line_slider_label_y = build_label(text="Y Slice")
-        opacity_slider_label = build_label(text="Opacity")
-
-        panel = ui.Panel2D(size=(300, 200), color=(1, 1, 1), opacity=0.1, align="right")
-        panel.center = (1030, 120)
-
-        panel.add_element(line_slider_label_x, (0.1, 0.75))
-        panel.add_element(line_slider_x, (0.38, 0.75))
-        panel.add_element(line_slider_label_y, (0.1, 0.55))
-        panel.add_element(line_slider_y, (0.38, 0.55))
-        panel.add_element(line_slider_label_z, (0.1, 0.35))
-        panel.add_element(line_slider_z, (0.38, 0.35))
-        panel.add_element(opacity_slider_label, (0.1, 0.15))
-        panel.add_element(opacity_slider, (0.38, 0.15))
-
-        show_m.scene.add(panel)
-
-        global size
-        size = figure.GetSize()
-
-        def win_callback(obj, event):
-            global size
-            if size != obj.GetSize():
-                size_old = size
-                size = obj.GetSize()
-                size_change = [size[0] - size_old[0], 0]
-                panel.re_align(size_change)
-
-    show_m.initialize()
-
-    figure.zoom(1.5)
-    figure.reset_clipping_range()
-
-    if interact:
-        show_m.add_window_callback(win_callback)
-        show_m.render()
-        show_m.start()
+        y = shape[1] // 2
+    if z is None:
+        z = shape[2] // 2
+    slicer_actor = actor.data_slicer(volume, opacity=opacity, initial_slices=(x, y, z))
+    figure.add(slicer_actor)
 
     return _inline_interact(figure, inline, interact)
 
@@ -523,10 +395,8 @@ def _draw_core(
     if flip_axes[2]:
         fgarray[:, 2] = dimensions[2] - fgarray[:, 2]
 
-    sl_actor = actor.line([fgarray], line_color)
+    sl_actor = actor.streamlines([fgarray], colors=line_color, thickness=20)
     figure.add(sl_actor)
-    sl_actor.GetProperty().SetRenderLinesAsTubes(1)
-    sl_actor.GetProperty().SetLineWidth(20)
 
     return line_color_untouched
 
@@ -592,7 +462,7 @@ def single_bundle_viz(
         flip_axes = [False, False, False]
     if figure is None:
         figure = window.Scene()
-        figure.SetBackground(1, 1, 1)
+    figure.background = (1, 1, 1)
 
     n_points = len(indiv_profile)
     sls, _, bundle_name, dimensions = next(

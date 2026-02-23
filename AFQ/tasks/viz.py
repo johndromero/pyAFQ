@@ -385,16 +385,12 @@ def plot_tract_profiles(base_fname, output_dir, scalars, segmentation_imap):
 
 
 @immlib.calc("viz_backend")
-def init_viz_backend(viz_backend_spec="plotly_no_gif", virtual_frame_buffer=False):
+def init_viz_backend(viz_backend_spec="plotly_no_gif"):
     """
     An instance of the `AFQ.viz.utils.viz_backend` class.
 
     Parameters
     ----------
-    virtual_frame_buffer : bool, optional
-        Whether to use a virtual frame buffer. This is  if
-        generating GIFs in a headless environment.
-        Default: False
     viz_backend_spec : str, optional
         Which visualization backend to use.
         See Visualization Backends page in documentation for details
@@ -402,16 +398,8 @@ def init_viz_backend(viz_backend_spec="plotly_no_gif", virtual_frame_buffer=Fals
         One of {"fury", "plotly", "plotly_no_gif"}.
         Default: "plotly_no_gif"
     """
-    if not isinstance(virtual_frame_buffer, bool):
-        raise TypeError("virtual_frame_buffer must be a bool")
     if "fury" not in viz_backend_spec and "plotly" not in viz_backend_spec:
         raise TypeError("viz_backend_spec must contain either 'fury' or 'plotly'")
-
-    if virtual_frame_buffer:
-        from xvfbwrapper import Xvfb
-
-        vdisplay = Xvfb(width=1280, height=1280)
-        vdisplay.start()
 
     return Viz(backend=viz_backend_spec.lower())
 

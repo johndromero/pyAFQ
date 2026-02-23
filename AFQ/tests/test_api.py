@@ -17,7 +17,6 @@ import pytest
 import toml
 from dipy.io.streamline import load_tractogram
 from dipy.segment.metric import mdf
-from dipy.testing.decorators import xvfb_it
 from pandas.testing import assert_series_equal
 from pcollections._lazy import LazyError
 
@@ -272,7 +271,6 @@ def test_AFQ_no_derivs():
 
 
 @pytest.mark.nightly_custom
-@xvfb_it
 def test_AFQ_fury():
     tmpdir = tempfile.TemporaryDirectory()
     bids_path = op.join(tmpdir.name, "stanford_hardi")

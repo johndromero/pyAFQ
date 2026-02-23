@@ -439,7 +439,7 @@ class GroupCSVComparison:
         self.prof_len = 100 - (percent_nan_tol // 2) * 2
         if bundles is None:
             self.bundles = self.profile_dict[names[0]]["tractID"].unique()
-            self.bundles.sort()
+            self.bundles = sorted(self.bundles.tolist())
         else:
             self.bundles = bundles
         self.color_dict = vut.gen_color_dict([*self.bundles, "median"])

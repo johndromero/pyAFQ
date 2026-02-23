@@ -836,7 +836,6 @@ class GroupAFQ(object):
 
         t1_dict = self.export("t1_masked", collapse=False)
         viz_backend_dict = self.export("viz_backend", collapse=False)
-        b0_backend_dict = self.export("b0", collapse=False)
         dwi_affine_dict = self.export("dwi_affine", collapse=False)
         bundles_dict = self.export("bundles", collapse=False)
         best_scalar_dict = self.export(best_scalar, collapse=False)
@@ -847,7 +846,6 @@ class GroupAFQ(object):
             this_sub = self.valid_sub_list[ii]
             this_ses = self.valid_ses_list[ii]
             viz_backend = viz_backend_dict[this_sub][this_ses]
-            b0 = b0_backend_dict[this_sub][this_ses]
             t1 = nib.load(t1_dict[this_sub][this_ses])
             dwi_affine = dwi_affine_dict[this_sub][this_ses]
             bundles = bundles_dict[this_sub][this_ses]
@@ -913,17 +911,15 @@ class GroupAFQ(object):
 
                 pio.kaleido.scope._shutdown_kaleido()
             else:
-                from dipy.viz import window
+                from fury import window
 
-                direc = np.fromiter(eye.values(), dtype=int)
-                data_shape = np.asarray(nib.load(b0).get_fdata().shape)
-                figure.set_camera(
-                    position=direc * data_shape,
-                    focal_point=data_shape // 2,
-                    view_up=(0, 0, 1),
+                from AFQ.viz.fury_backend import scene_rotate_forward
+
+                show_m = window.ShowManager(
+                    scene=figure, window_type="offscreen", size=(600, 600)
                 )
-                figure.zoom(0.5)
-                window.snapshot(figure, fname=this_fname, size=(600, 600))
+                scene_rotate_forward(show_m, figure)
+                show_m.snapshot(this_fname)
 
         def _save_file(curr_img, curr_file_num):
             save_path = op.abspath(

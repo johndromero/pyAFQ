@@ -1,10 +1,13 @@
 import logging
 import math
+import tempfile
+from math import radians
 
 import numpy as np
 from dipy.data import default_sphere
 from dipy.reconst.gqi import squared_radial_component
 from dipy.tracking.streamline import set_number_of_points
+from PIL import Image
 from scipy.linalg import blas, pinvh
 from scipy.special import gammaln, lpmv
 from tqdm import tqdm
@@ -238,3 +241,44 @@ def gaussian_weights(bundle, n_points=100, return_mahalnobis=False, stat=np.mean
     weights = 1 / weights
     # Normalize before returning, so that the weights in each node sum to 1:
     return weights / np.sum(weights, 0)
+
+
+def make_gif(show_m, out_path, n_frames=36, az_ang=-10):
+    """
+    Make a video from a Fury Show Manager.
+
+    Parameters
+    ----------
+    show_m : Fury Show Manager
+        The Fury Show Manager to use for rendering.
+
+    out_path : str
+        The name of the output file.
+
+    n_frames : int
+        The number of frames to render.
+        Default: 36
+
+    az_ang : float
+        The angle to rotate the camera around the
+        z-axis for each frame, in degrees.
+        Default: -10
+    """
+    video = []
+
+    show_m.render()
+    show_m.window.draw()
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for ii in tqdm(range(n_frames), desc="Generating GIF"):
+            frame_fname = f"{tmp_dir}/{ii}.png"
+            show_m.screens[0].controller.rotate((radians(az_ang), 0), None)
+            show_m.render()
+            show_m.window.draw()
+            show_m.snapshot(frame_fname)
+            video.append(frame_fname)
+
+        video = [Image.open(frame) for frame in video]
+        video[0].save(
+            out_path, save_all=True, append_images=video[1:], duration=300, loop=1
+        )
