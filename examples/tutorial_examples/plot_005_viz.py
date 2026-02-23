@@ -131,7 +131,7 @@ cst_actor = actor.streamlines(cst_t1w, thickness=8)
 # -------------
 # The anatomical image is rendered using `slicer` actors. These are actors that
 # visualize one slice of a three dimensional volume. We call the function on the
-# T1-weighted data, selecting the # x slice that is half-way through the x
+# T1-weighted data, selecting the x slice that is half-way through the x
 # dimension of the image (`shape[0]`) and the z slice that is a third of a
 # way through that x dimension of the image (`shape[-1]`).
 # We set the visibility of the y slice to `False`
